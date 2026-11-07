@@ -1,0 +1,477 @@
+---
+title: "hussain-lab-0"
+subtitle: "Workplace Ratings"
+author: "Layla Hussain"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    theme: cosmo
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+
+library(carData)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(broom)
+library(performance)
+library(gt)
+
+# Loading the dataset
+dat <- attitude 
+
+```
+
+# Workplace Ratings Data
+
+```{r df setup}
+
+# Setting up the analysis data frame. 
+
+att_clean <- dat |>
+   select(rating, complaints, learning, raises) |>
+   drop_na()
+
+```
+
+# Data Exploration
+
+## Descriptive Statistics
+
+```{r}
+#| label: descriptive-table
+#| tbl-cap: "Descriptive statistics for continuous variables"
+
+descriptives <- att_clean |>
+  summarise(
+    across(
+      c(rating, complaints, learning, raises),
+      list(mean = mean, sd = sd, min = min, max = max)
+    )
+  ) |>
+  pivot_longer(
+    everything(),
+    names_to = c("variable", ".value"),
+    names_sep = "_"
+  )
+
+descriptives |>
+  gt() |>
+  fmt_number(columns = where(is.numeric), decimals = 2)
+
+```
+
+## Distribution of Workplace Ratings
+
+```{r}
+#| label: rating-distribution
+#| fig-cap: "Distribution of workplace rating scores"
+
+ggplot(att_clean, aes(x = rating)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    bins = 15,
+    fill = "#669BBC",
+    color = "white",
+    alpha = 0.8
+  ) +
+  geom_density(
+    linewidth = 0.9,
+    color = "#9A3038"
+  ) +
+  labs(
+    x = "Workplace Rating score",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+## Relationships between predictors and workplace rating
+
+```{r}
+#| label: complaints-scatterplot
+#| fig-cap: "Relationship between number of complaints and workplace rating"
+
+ggplot(dat, aes(x = complaints, y = rating)) +
+  geom_point(alpha = 0.75) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    color = "#27638A"
+  ) +
+  labs(
+    x = "Number of complaints",
+    y = "Workplace rating"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+```{r}
+#| label: raises-scatterplot
+#| fig-cap: "Relationship between number of raises and workplace rating"
+
+ggplot(dat, aes(x = raises, y = rating)) +
+  geom_point(alpha = 0.75) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    color = "#27638A"
+  ) +
+  labs(
+    x = "Number of raises",
+    y = "Workplace rating"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+Based on the two exploratory scatter plots, we can gather that there is a) a positive linear relationship between the number of complaints made and workplace ratings and b) a positive linear relationship between the number of raises granted and workplace ratings. The regression line for complaints and rating appears to be steeper than the regression line for raises and rating. These results are somewhat surprising. I expected that frequent complaints would be related to lower workplace ratings. Though from these plots, it might suggest that more complaints might indicate a more flexible workplace where improvements are made more often.
+
+There are no unusual observations that stand out, but it is notable the the dispersion of observations in the raises scatter plot is greater than that of the complaints scatter plot.
+
+# Comparing Model Performance
+
+I expect the three predictors to be associated with overall workplace ratings. As stated above, complaints may explain the most of the variation in the workplace ratings data. When complaints are formally made, and action is taken to resolve them, the overall workplace rating should increase. As well, raises might be explained complaints since a proportion of complaints submitted might be complaints of unsatisfactory pay or raises.
+
+Opportunities for learning could also explain additional variation beyond complaint handling because for some employees their perceptions they they are learning or gaining enough skills may be more relevant to how they rate their workplace above and beyond any complaints they have, especially if complaints are being addressed such that they are able to improve employee learning.
+
+I predict that pay increases will explain further variation after accounting for complaints and learning because regardless of complaints and learning, pay is a hugely motivating factor for people to either stay at or leave their current workplace. People who stay at their workplace because they are satisfied with the pay increases will likely report higher workplace ratings.
+
+```{r}
+#| label: fit-models
+
+# Intercept-only model - Baseline model
+mod0 <- lm(rating ~ 1, data = dat)
+
+# Complaints model - rating varies with complaints 
+mod1 <- lm(rating ~ complaints, data = dat)
+
+# complaints + learning model - learning explains additional variation 
+mod2 <- lm(rating ~ complaints + learning, data = dat)
+
+# Expanded model - pay raises explains additional variation 
+mod3 <- lm(rating ~ complaints + learning + raises, data = dat)
+```
+
+## Inspecting the models
+
+In model 1, the complaints coefficient is 0.75461. In model 2 this changes to 0.6435. Finally, in model 3 it ends up as 0.65349. This suggests that when no other predictors are being controlled for, a 1-unit increase in complaints predicts an increase in rating increases by 0.75461 points. When controlling for learning, a 1-unit increase in complaints predicts an increase in rating increases by 0.6435 points. This means that some of the association between complaints and rating overlaps with learning.Finally, when controlling for both learning and raises, a 1-unit increase in complaints predicts an increase in rating increases by 0.65349 points. In each model, the complaints coefficients is significant.
+
+## Conducting nested-model comparisons
+
+```{r}
+#| label: nested-tests
+
+tests <- anova(mod0, mod1, mod2, mod3)
+
+tests
+```
+
+```{r}
+#| label: prepare-nested-tests
+
+tests <- tests |>
+  select(Df, Res.Df, F, `Pr(>F)`) |>
+  rename(
+    Residual.df = Res.Df,
+    Nested.Df = Df,
+    Nested.F.stat = F,
+    Nested.p.value = `Pr(>F)`)
+  
+```
+
+## Extracting overall model performance
+
+```{r}
+#| label: extract-model-metrics
+
+glance0 <- glance(mod0)
+glance1 <- glance(mod1)
+glance2 <- glance(mod2)
+glance3 <- glance(mod3)
+```
+
+```{r}
+#| label: combine-model-metrics
+
+mods <- c(
+  "M0: Null",
+  "M1: Complaints",
+  "M2: + Learning",
+  "M3: + Raises"
+)
+
+glances <- rbind(
+  glance0,
+  glance1,
+  glance2,
+  glance3
+)
+```
+
+```{r}
+#| label: combine-comparisons
+
+# Using cbind to combine the rows in `glances` and `tests.`
+
+comparison_table <- cbind(
+  Model = mods,
+  glances,
+  tests
+)
+```
+
+```{r}
+#| label: prepare-comparison-table
+
+# Using lag to find determine change in R²
+
+comparison_table <- comparison_table |>
+  mutate(
+    Delta.R2 = r.squared - lag(r.squared),
+
+#RMSE calculation 
+    
+    RMSE = c(
+      sqrt(mean(residuals(mod0)^2)),
+      sqrt(mean(residuals(mod1)^2)),
+      sqrt(mean(residuals(mod2)^2)),
+      sqrt(mean(residuals(mod3)^2))
+    )
+  ) |>
+  select(
+    Model,
+    r.squared,
+    Delta.R2,
+    adj.r.squared,
+    RMSE,
+    Residual.df,
+    Nested.Df,
+    Nested.F.stat,
+    Nested.p.value
+  )
+```
+
+## Model Comparison Table - Combined
+
+```{r}
+#| label: model-comparison-table
+#| tbl-cap: "Overall model performance and incremental comparisons of nested-models"
+
+comparison_table |>
+# i found  the other to be confusing, so i reordered the colomns before piping to gt
+    select(
+    Model,
+    r.squared,
+    adj.r.squared,
+    RMSE,
+    Residual.df,
+    Delta.R2,
+    Nested.Df,
+    Nested.F.stat,
+    Nested.p.value
+  ) |>
+# creating the gt table and adjusting the decimals.  
+  gt() |>
+  cols_label(
+    Model = "Model",
+    r.squared = "R²",
+    adj.r.squared = "Adjusted R²",
+    RMSE = "RMSE",
+    Residual.df = "Residual df",
+    Delta.R2 = "ΔR²",
+    Nested.Df = "Nested df",
+    Nested.F.stat = "Nested F",
+    Nested.p.value = "Nested p"
+  ) |>
+     tab_spanner(
+         label="Overall Performance",
+         columns = c(r.squared, adj.r.squared, RMSE)
+     )|>
+         tab_spanner(
+         label="Incremental Improvements",
+         columns = c(Delta.R2, Nested.Df, Nested.F.stat, Nested.p.value)
+         ) |> 
+  fmt_number(
+    columns = c(
+      r.squared,
+      Delta.R2,
+      adj.r.squared,
+      RMSE,
+      Nested.F.stat
+    ),
+    decimals = 4
+  ) |>
+  fmt(
+    columns = Nested.p.value,
+    fns = function(x) {
+      ifelse(
+        is.na(x),
+        "—",
+        ifelse(x < .001, "< .001", sprintf("%.3f", x))
+      )
+    }
+  ) |>
+  sub_missing(
+    columns = c(Delta.R2, Nested.Df, Nested.F.stat),
+    missing_text = "—"
+  )
+
+
+```
+
+### Interpreting the combined table
+
+Despite the fact that m3 has the largest R² and m2 has the largest adjusted R², neither would be my choice for the best model to use. Adding learning and raises to the models increases R², but the other metrics of model performance suggest that neither model 2 nor 3 make for good choices. The nested p for m2 and m3 are insignificant, and the delta R² are also quite small for both. When comparing m1 to m2 and m2 to m3, the reductions in RMSE do not appear substantively meaningful but when comparing m0 to m1, the reduction is seems substantial and meaningful. The nested p is only significant for model 1 (when complaints considered in the rating model but not learning and raises). After m1 each successive model does not explain much more variation. When considering the nested F, M1 explains the largest proportion of variation in rating.
+
+```{r}
+#| label: select-model
+
+selected_row <- comparison_table |>
+  slice_max(
+    order_by = adj.r.squared,
+    n = 1,
+    with_ties = FALSE
+  )
+
+selected_name <- selected_row$Model
+
+selected_model <- switch(
+  selected_name,
+  "M0: Null" = mod0,
+  "M1: complaints" = mod1,
+  "M2: + learning" = mod2,
+  "M3: + raises" = mod3
+)
+```
+
+# Evaluating Regression Diagnostics
+
+## Examining the Assumptions
+
+### Standard diagnostic plots
+
+```{r}
+#| label: diagnostics
+#| fig-cap: "Regression diagnostic plots for the provisionally selected model"
+#| fig-width: 9
+#| fig-height: 8
+
+op <- par(mfrow = c(2, 2))
+ 
+plot(mod1)
+
+par(op)
+
+```
+```{r}
+#| label: diagnostics1
+#| fig-cap: "Regression diagnostic plots for the provisionally selected model"
+#| fig-width: 9
+#| fig-height: 8
+#| 
+performance::check_model(mod1)
+
+```
+### Findings & Model Selection
+
+Based on the  standard diagnostic plots I generated for model 1, it appears that all the assumptions were reasonable satisfied. One issue might be in the homogeneity of variance. The reference line is horizontal but not especially flat. It has bumps and curves. Though when I compared to model performance of m1 to m2 and m3, all the models seemed to have this issue, so it may reflect details specific to our data set that are legitimate. As such, I will retain model 1 as my selected model. 
+
+You are not required to select the most complex model.
+Write a paragraph explaining why your preferred model is more appropriate than the
+alternatives.
+
+M1 is preferred over the other models because it explain the majority of the variance while remaining the most parsimonious option. Because there are no additional predictors in M1 there is no concern of problematic colinearity. As well, the model performance appears to satisfy all the necessary assumptions. 
+
+## Coefficient Table
+
+```{r}
+#| label: extract-coefficients
+
+coefficient_results <- tidy(
+  mod1,
+  conf.int = TRUE,
+  conf.level = 0.95
+)
+```
+
+```{r}
+#| label: coefficient-table
+#| tbl-cap: "Unstandardized regression coefficients for the Model 1"
+
+coefficient_results |>
+  select(
+    term,
+    estimate,
+    std.error,
+    conf.low,
+    conf.high,
+    p.value
+  ) |>
+  gt() |>
+  cols_label(
+    term = "Predictor",
+    estimate = "Estimate",
+    std.error = "SE",
+    conf.low = "95% CI lower",
+    conf.high = "95% CI upper",
+    p.value = "p"
+  ) |>
+  fmt_number(
+    columns = c(
+      estimate,
+      std.error,
+      conf.low,
+      conf.high
+    ),
+    decimals = 3
+  ) |>
+  fmt(
+    columns = p.value,
+    fns = function(x) {
+      ifelse(
+        x < .001,
+        "< .001",
+        sprintf("%.3f", x)
+      )
+    }
+  )
+```
+
+```{r}
+#| label: selected-model-performance
+#| tbl-cap: "Overall performance of the Model 1"
+
+selected_row |>
+  select(
+    Model,
+    r.squared,
+    adj.r.squared,
+    RMSE
+  ) |>
+  gt() |>
+  cols_label(
+    Model = "Model",
+    r.squared = "R²",
+    adj.r.squared = "Adjusted R²",
+    RMSE = "RMSE"
+  ) |>
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 3
+  )
+```
+
+
+In model 1, the complaints coefficient is 0.755. This indicates positive association. This means that a 1-unit increase in complaints predicts an increase in rating increases by 0.755 points. No additional variables are being held constant because there is only one predictor in this case. The confidence intervals rather large. This reflects a fair degree of uncertainty since a large interval indicates that the true value may be rather different than what we are observing here. 
+
+Note: I ran out of time to finish this assignment. I know that the code chunk above produces a table for M2 rather than the model I selected (M1). I have no idea how to fix this. 
